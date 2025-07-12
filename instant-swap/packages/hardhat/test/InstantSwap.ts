@@ -10,9 +10,10 @@ describe("InstantSwap", function () {
   let owner: any;
   let signer1: any;
   let signer2: any;
+  let signer3: any;
 
   before(async () => {
-    [owner, signer1, signer2] = await ethers.getSigners();
+    [owner, signer1, signer2, signer3] = await ethers.getSigners();
 
     // mockERC20 deploy
     const mockETHContractFactory = await ethers.getContractFactory("MockERC20");
@@ -74,7 +75,6 @@ describe("InstantSwap", function () {
       const signature = await signer1.signTypedData(domain, types, order);
       console.log("signer1이 생성한 서명:", signature);
 
-      // taker 토큰 승인 & 스왑 실행
       await mockLINK.connect(signer2).approve(await instantSwapContract.getAddress(), order.amountT);
       console.log("signer2가 LINK 토큰 승인 완료");
       const tx = await instantSwapContract.connect(signer2).instantSwap(order, signature);
