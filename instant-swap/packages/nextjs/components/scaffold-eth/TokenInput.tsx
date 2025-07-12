@@ -1,17 +1,15 @@
 import { useEffect, useState } from "react";
+import { Chainlink } from "dev3-sdk";
+import { formatUnits, isAddress, parseAbi } from "viem";
+import { useAccount, usePublicClient } from "wagmi";
 import { Address } from "~~/components/scaffold-eth/Address/Address";
 import { AddressInput } from "~~/components/scaffold-eth/Input/AddressInput";
-import { usePublicClient, useAccount } from "wagmi";
-import { formatUnits, parseAbi, isAddress } from "viem";
-import { Chainlink } from "dev3-sdk"
 
-
-
-
-const ERC20_ABI = parseAbi([
+export const ERC20_ABI = parseAbi([
   "function symbol() view returns (string)",
   "function decimals() view returns (uint8)",
   "function balanceOf(address) view returns (uint256)",
+  "function approve(address spender, uint256 value) returns (bool)",
 ]);
 
 interface TokenInputProps {
@@ -29,14 +27,14 @@ export const TokenInput = ({ label, value, onChange, amount, onAmountChange, pla
   const [tokenDecimals, setTokenDecimals] = useState<number>(18);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>("");
-  
+
   const publicClient = usePublicClient();
   const { address: userAddress } = useAccount();
 
   useEffect(() => {
     const getTokenInfo = async () => {
       if (!value || !publicClient || !userAddress) return;
-      
+
       // Validate address format
       if (!isAddress(value)) {
         setError("Invalid address format");
@@ -44,10 +42,10 @@ export const TokenInput = ({ label, value, onChange, amount, onAmountChange, pla
         setTokenBalance("");
         return;
       }
-      
+
       setIsLoading(true);
       setError("");
-      
+
       try {
         // Get token symbol
         const symbol = await publicClient.readContract({
@@ -55,7 +53,7 @@ export const TokenInput = ({ label, value, onChange, amount, onAmountChange, pla
           abi: ERC20_ABI,
           functionName: "symbol",
         });
-        
+
         // Get token decimals
         const decimals = await publicClient.readContract({
           address: value as `0x${string}`,
@@ -100,21 +98,11 @@ export const TokenInput = ({ label, value, onChange, amount, onAmountChange, pla
       </label>
       <div className="flex gap-2 items-center">
         <div className="flex-grow">
-          <AddressInput
-            value={value}
-            onChange={onChange}
-            placeholder={placeholder || "Enter token address"}
-          />
+          <AddressInput value={value} onChange={onChange} placeholder={placeholder || "Enter token address"} />
         </div>
-        {isLoading && (
-          <div className="badge badge-ghost">Loading...</div>
-        )}
-        {!isLoading && tokenSymbol && (
-          <div className="badge badge-primary">{tokenSymbol}</div>
-        )}
-        {!isLoading && error && (
-          <div className="badge badge-error">{error}</div>
-        )}
+        {isLoading && <div className="badge badge-ghost">Loading...</div>}
+        {!isLoading && tokenSymbol && <div className="badge badge-primary">{tokenSymbol}</div>}
+        {!isLoading && error && <div className="badge badge-error">{error}</div>}
       </div>
       <div className="mt-2">
         <div className="flex items-center justify-between mb-1">
@@ -122,10 +110,7 @@ export const TokenInput = ({ label, value, onChange, amount, onAmountChange, pla
             {tokenBalance && `Balance: ${Number(tokenBalance).toFixed(4)} ${tokenSymbol}`}
           </label>
           {tokenBalance && (
-            <button
-              className="btn btn-xs btn-ghost"
-              onClick={handleMaxClick}
-            >
+            <button className="btn btn-xs btn-ghost" onClick={handleMaxClick}>
               MAX
             </button>
           )}
@@ -135,10 +120,10 @@ export const TokenInput = ({ label, value, onChange, amount, onAmountChange, pla
           placeholder="Amount"
           className="input input-bordered w-full"
           value={amount}
-          onChange={(e) => onAmountChange(e.target.value)}
+          onChange={e => onAmountChange(e.target.value)}
           max={tokenBalance}
         />
       </div>
     </div>
   );
-}; 
+};

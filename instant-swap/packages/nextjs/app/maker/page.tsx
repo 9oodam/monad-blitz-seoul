@@ -1,12 +1,13 @@
 "use client";
 
-import type { NextPage } from "next";
 import { useState } from "react";
+import type { NextPage } from "next";
+import { encodePacked, isAddress, keccak256 } from "viem";
 import { useAccount, useWalletClient } from "wagmi";
 import { ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
 import { Address, AddressInput } from "~~/components/scaffold-eth";
-import { TokenInput } from "~~/components/scaffold-eth/TokenInput";
-import { encodePacked, keccak256, isAddress } from "viem";
+import { ERC20_ABI, TokenInput } from "~~/components/scaffold-eth/TokenInput";
+import { useDeployedContractInfo } from "~~/hooks/scaffold-eth";
 
 const MakerPage: NextPage = () => {
   const { address: connectedAddress } = useAccount();
@@ -18,7 +19,13 @@ const MakerPage: NextPage = () => {
   const [takerAddress, setTakerAddress] = useState("");
   const [error, setError] = useState("");
 
+  const { data: instantSwapInfo } = useDeployedContractInfo({
+    contractName: "InstantSwap",
+  });
+
   const createOrder = async () => {
+    if (!instantSwapInfo) return;
+
     setError("");
 
     if (!connectedAddress || !walletClient || !sourceToken || !targetToken || !sourceAmount || !targetAmount) {
@@ -38,36 +45,81 @@ const MakerPage: NextPage = () => {
         taker: takerAddress || "0x0000000000000000000000000000000000000000", // Use zero address if no specific taker
         tokenM: sourceToken,
         tokenT: targetToken,
-        amountM: BigInt(sourceAmount),
-        amountT: BigInt(targetAmount),
+        amountM: BigInt(sourceAmount) * BigInt(10 ** 18),
+        amountT: BigInt(targetAmount) * BigInt(10 ** 18),
         expiry: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour from now
-        nonce: BigInt(Math.floor(Math.random() * 1000000000))
+        nonce: BigInt(Math.floor(Math.random() * 1000000000)),
       };
 
-      // Create message hash for signing
-      const messageHash = keccak256(
-        encodePacked(
-          ["address", "address", "address", "address", "uint256", "uint256", "uint256", "uint256"],
-          [order.maker, order.taker, order.tokenM, order.tokenT, order.amountM, order.amountT, order.expiry, order.nonce]
-        )
-      );
-
-      // Sign the message
-      const signature = await walletClient.signMessage({
-        message: { raw: messageHash },
+      // maker approve
+      await walletClient?.writeContract({
+        address: order.tokenM as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [instantSwapInfo.address, order.amountM],
       });
+
+      const domain = {
+        name: "InstantSwap",
+        version: "1",
+        chainId: await walletClient.chain?.id,
+        verifyingContract: instantSwapInfo.address,
+      };
+
+      const types = {
+        SwapOrder: [
+          { name: "maker", type: "address" },
+          { name: "taker", type: "address" },
+          { name: "tokenM", type: "address" },
+          { name: "tokenT", type: "address" },
+          { name: "amountM", type: "uint256" },
+          { name: "amountT", type: "uint256" },
+          { name: "expiry", type: "uint256" },
+          { name: "nonce", type: "uint256" },
+        ],
+      };
+
+      const signature = await walletClient.signTypedData({
+        domain,
+        types,
+        primaryType: "SwapOrder",
+        message: order,
+      });
+
+      // Create message hash for signing
+      // const messageHash = keccak256(
+      //   encodePacked(
+      //     ["address", "address", "address", "address", "uint256", "uint256", "uint256", "uint256"],
+      //     [
+      //       order.maker,
+      //       order.taker,
+      //       order.tokenM,
+      //       order.tokenT,
+      //       order.amountM,
+      //       order.amountT,
+      //       order.expiry,
+      //       order.nonce,
+      //     ],
+      //   ),
+      // );
+
+      // // Sign the message
+      // const signature = await walletClient.signMessage({
+      //   message: { raw: messageHash },
+      // });
 
       // Create the final order object with signature
       const orderWithSignature = {
         order,
-        signature
+        signature,
       };
 
       // Convert to JSON and download
-      const blob = new Blob([JSON.stringify(orderWithSignature, (_, value) =>
-        typeof value === 'bigint' ? value.toString() : value
-      , 2)], { type: "application/json" });
-      
+      const blob = new Blob(
+        [JSON.stringify(orderWithSignature, (_, value) => (typeof value === "bigint" ? value.toString() : value), 2)],
+        { type: "application/json" },
+      );
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -76,7 +128,6 @@ const MakerPage: NextPage = () => {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
     } catch (error) {
       console.error("Error creating order:", error);
       setError("Failed to create order. Please try again.");
@@ -128,11 +179,9 @@ const MakerPage: NextPage = () => {
                   />
                 </div>
 
-                {error && (
-                  <div className="text-error text-sm text-center">{error}</div>
-                )}
+                {error && <div className="text-error text-sm text-center">{error}</div>}
 
-                <button 
+                <button
                   className="btn btn-primary mt-4"
                   onClick={createOrder}
                   disabled={!sourceToken || !targetToken || !sourceAmount || !targetAmount}

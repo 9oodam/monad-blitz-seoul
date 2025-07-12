@@ -1,16 +1,30 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useCallback, useState } from "react";
 import type { NextPage } from "next";
-import { useAccount } from "wagmi";
-import { ArrowsRightLeftIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
+import { getContract } from "viem";
+import { useAccount, usePublicClient, useWalletClient } from "wagmi";
+import { ArrowPathIcon, ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
 import { Address } from "~~/components/scaffold-eth";
 import { SwapOrderDisplay } from "~~/components/scaffold-eth/SwapOrderDisplay";
+import { ERC20_ABI } from "~~/components/scaffold-eth/TokenInput";
+import {
+  useDeployedContractInfo,
+  useScaffoldContract,
+  useScaffoldWriteContract,
+  useTransactor,
+} from "~~/hooks/scaffold-eth";
 import { SwapOrder } from "~~/types/order";
 
 const TakerPage: NextPage = () => {
+  const { data: walletClient } = useWalletClient();
+  const publicClient = usePublicClient(); // data 필요 없음
+
   const { address: connectedAddress } = useAccount();
   const [uploadedOrder, setUploadedOrder] = useState<SwapOrder | null>(null);
+  const [makerSignature, setMakerSignature] = useState<string>("");
+
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
   const handleFileUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -19,20 +33,32 @@ const TakerPage: NextPage = () => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = e => {
       try {
         const content = e.target?.result as string;
-        const orderJson = JSON.parse(content) as { order: SwapOrder };
-        const order = orderJson.order;
-        console.log(orderJson.order)
-        
+        // const orderJson = JSON.parse(content) as { order: SwapOrder };
+        const orderJson = JSON.parse(content);
+        const order: SwapOrder = orderJson.order;
+        const signature = orderJson.signature;
+        console.log(order);
+        console.log(signature);
+
         // Basic validation
-        if (!order.maker || !order.taker || !order.tokenM || !order.tokenT || 
-            !order.amountM || !order.amountT || !order.expiry || !order.nonce) {
+        if (
+          !order.maker ||
+          !order.taker ||
+          !order.tokenM ||
+          !order.tokenT ||
+          !order.amountM ||
+          !order.amountT ||
+          !order.expiry ||
+          !order.nonce
+        ) {
           throw new Error("Invalid order format");
         }
 
         setUploadedOrder(order);
+        setMakerSignature(signature);
       } catch (err) {
         setError("Failed to parse order file. Please make sure it's a valid swap order JSON file.");
         console.error(err);
@@ -40,6 +66,51 @@ const TakerPage: NextPage = () => {
     };
     reader.readAsText(file);
   }, []);
+
+  const { writeContractAsync: writeInstantSwapAsync } = useScaffoldWriteContract({
+    contractName: "InstantSwap",
+  });
+  const { data: instantSwapInfo } = useDeployedContractInfo({
+    contractName: "InstantSwap",
+  });
+
+  const transactor = useTransactor();
+
+  const handleInstantSwap = async () => {
+    if (!uploadedOrder || !instantSwapInfo) return;
+    setIsLoading(true);
+    setError("");
+
+    try {
+      // 1) approve
+      await walletClient?.writeContract({
+        address: uploadedOrder.tokenT as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: "approve",
+        args: [instantSwapInfo.address, uploadedOrder.amountT],
+      });
+
+      // 2) swap
+      await writeInstantSwapAsync({
+        functionName: "instantSwap",
+        args: [
+          {
+            maker: uploadedOrder.maker,
+            taker: uploadedOrder.taker,
+            tokenM: uploadedOrder.tokenM,
+            tokenT: uploadedOrder.tokenT,
+            amountM: uploadedOrder.amountM,
+            amountT: uploadedOrder.amountT,
+            expiry: uploadedOrder.expiry,
+            nonce: uploadedOrder.nonce,
+          },
+          makerSignature as `0x${string}`,
+        ],
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   return (
     <>
@@ -81,7 +152,7 @@ const TakerPage: NextPage = () => {
                   <div className="mt-4">
                     <h3 className="text-lg font-semibold mb-2">Swap Order Details</h3>
                     <SwapOrderDisplay order={uploadedOrder} />
-                    <button className="btn btn-primary w-full mt-4">
+                    <button className="btn btn-primary w-full mt-4" onClick={handleInstantSwap}>
                       Accept and Execute Swap
                     </button>
                   </div>
@@ -103,4 +174,4 @@ const TakerPage: NextPage = () => {
   );
 };
 
-export default TakerPage; 
+export default TakerPage;
